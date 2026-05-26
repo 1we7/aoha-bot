@@ -20,15 +20,13 @@ client.commands = new Collection();
 client.voiceJoinTimes = new Map();
 client.invitesCache = new Map();
 
-// Handler de commandes récursif pour lire les sous-dossiers
 const commandsPath = path.join(__dirname, 'commands');
-const commandFolders = fs.readdirSync(commandsPath);
 const commandsData = [];
 
-for (const folder of commandFolders) {
+for (const folder of fs.readdirSync(commandsPath)) {
     const folderPath = path.join(commandsPath, folder);
-    const commandFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.js'));
-    for (const file of commandFiles) {
+    if (!fs.statSync(folderPath).isDirectory()) continue; // ignore les fichiers
+    for (const file of fs.readdirSync(folderPath).filter(f => f.endsWith('.js'))) {
         const command = require(path.join(folderPath, file));
         if ('data' in command && 'execute' in command) {
             client.commands.set(command.data.name, command);
@@ -37,12 +35,9 @@ for (const folder of commandFolders) {
     }
 }
 
-// Handler d'événements
 const eventsPath = path.join(__dirname, 'events');
-const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
-for (const file of eventFiles) {
-    const filePath = path.join(eventsPath, file);
-    const event = require(filePath);
+for (const file of fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'))) {
+    const event = require(path.join(eventsPath, file));
     if (event.once) {
         client.once(event.name, (...args) => event.execute(...args, client));
     } else {
@@ -50,7 +45,6 @@ for (const file of eventFiles) {
     }
 }
 
-// Auto-deploy des commandes au démarrage
 async function deployCommands() {
     try {
         const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
