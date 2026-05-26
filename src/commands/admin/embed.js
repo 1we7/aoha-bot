@@ -147,7 +147,7 @@ function renderAdminPanel(state) {
     return {
         embeds: [embed],
         components: rows,
-        ephemeral: true
+        flags: [MessageFlags.Ephemeral]
     };
 }
 
@@ -203,10 +203,8 @@ module.exports = {
                         const jsonRaw = mInt.fields.getTextInputValue('json_data');
                         const parsed = JSON.parse(jsonRaw);
 
-                        // Sauvegarde globale pour gérer le texte et les vrais embeds
                         state.rawData = parsed;
 
-                        // Rétrocompatibilité si le JSON contient aussi des composants
                         let rootArray = null;
                         if (parsed.components) rootArray = parsed.components;
                         else if (Array.isArray(parsed)) rootArray = parsed;
@@ -260,14 +258,16 @@ module.exports = {
                 }
 
                 if (i.customId === 'v2_execute_publish') {
+                    // On defer la bonne interaction (le clic du bouton)
                     await i.deferUpdate();
 
                     const targetChannel = await interaction.guild.channels.fetch(state.channelId).catch(() => null);
                     if (!targetChannel) {
-                        return interaction.followUp({ content: '❌ Salon introuvable. Vérifie les permissions du bot.', ephemeral: true });
+                        // Utilisation de i.followUp au lieu de interaction.followUp
+                        return i.followUp({ content: '❌ Salon introuvable. Vérifie les permissions du bot.', ephemeral: true });
                     }
 
-                    // Préparation de la charge utile d'envoi à Discord
+                    // --- Payload du message PERMANENT ---
                     const sendPayload = {};
 
                     if (state.rawData) {
@@ -277,37 +277,30 @@ module.exports = {
                         }
                     }
 
-                    // Gestion des composants avancés (Components V2)
+                    // Composants V2 compilés depuis les items parsés
                     const advancedComponents = compileComponentsV2(state, false);
 
                     if (advancedComponents.length > 0) {
-                        // Cas 1 : des composants V2 ont été parsés depuis le JSON
                         sendPayload.components = advancedComponents;
                         sendPayload.flags = [MessageFlags.IsComponentsV2];
                     } else if (state.rawData?.components && state.rawData.components.length > 0) {
-                        // Cas 2 : le JSON brut contient des composants, on les passe directement
                         sendPayload.components = state.rawData.components;
-
-                        // On ajoute le flag IsComponentsV2 si le JSON contient un container (type 17)
                         const hasV2Container = state.rawData.components.some(c => c.type === 17);
-                        if (hasV2Container) {
-                            sendPayload.flags = [MessageFlags.IsComponentsV2];
-                        }
+                        if (hasV2Container) sendPayload.flags = [MessageFlags.IsComponentsV2];
                     }
 
-                    // Vérifie qu'il y a bien quelque chose à envoyer
-                    const hasContent = sendPayload.content || 
-                                       (sendPayload.embeds && sendPayload.embeds.length > 0) || 
-                                       (sendPayload.components && sendPayload.components.length > 0);
+                    const hasContent = sendPayload.content ||
+                                       (sendPayload.embeds?.length > 0) ||
+                                       (sendPayload.components?.length > 0);
 
                     if (!hasContent) {
-                        return interaction.followUp({ 
-                            content: '❌ Aucun contenu à envoyer. Le JSON importé ne contient ni texte, ni embed, ni composant reconnu.', 
-                            ephemeral: true 
+                        return i.followUp({
+                            content: '❌ Aucun contenu à envoyer. Le JSON ne contient ni texte, ni embed, ni composant reconnu.',
+                            ephemeral: true
                         });
                     }
 
-                    // Traitement de la base de données pour les boutons d'actions personnalisés
+                    // Sauvegarde des boutons custom en BDD
                     for (const item of state.items) {
                         if (item.type === 9 && item.button && item.button.action_type !== 'link') {
                             const dbActionType = item.button.action_type === 'eph' ? 'ephemeral' : item.button.action_type;
@@ -321,20 +314,23 @@ module.exports = {
                     }
 
                     try {
+                        // ✅ Envoi PERMANENT dans le salon cible
                         await targetChannel.send(sendPayload);
-
                         collector.stop();
-                        return interaction.editReply({ 
-                            content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`, 
-                            embeds: [], 
-                            components: [] 
+
+                        // ✅ On utilise bien i.editReply() sur l'interaction du bouton
+                        return i.editReply({
+                            content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`,
+                            embeds: [],
+                            components: []
                         });
-                        
+
                     } catch (error) {
                         console.error('[embed.js] Erreur lors de l\'envoi :', error);
-                        return interaction.followUp({ 
-                            content: `❌ Échec du transfert. Discord a refusé le format.\n**Détail :** \`${error.message}\``, 
-                            ephemeral: true 
+                        // ✅ En cas d'erreur on utilise bien i.followUp()
+                        return i.followUp({
+                            content: `❌ Échec de l'envoi. Discord a refusé le format.\n**Détail :** \`${error.message}\``,
+                            ephemeral: true
                         });
                     }
                 }
