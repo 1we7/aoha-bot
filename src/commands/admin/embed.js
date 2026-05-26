@@ -147,7 +147,7 @@ function renderAdminPanel(state) {
     return {
         embeds: [embed],
         components: rows,
-        flags: [MessageFlags.Ephemeral]
+        flags: MessageFlags.Ephemeral
     };
 }
 
@@ -164,12 +164,14 @@ module.exports = {
             rawData: null
         };
 
-        const msg = await interaction.reply({ ...renderAdminPanel(state), withResponse: true });
-        const collector = msg.resource.message.createMessageComponentCollector({ time: 1800000 });
+        await interaction.reply({ ...renderAdminPanel(state) });
+
+        const collector = interaction.channel.createMessageComponentCollector({
+            filter: i => i.user.id === interaction.user.id,
+            time: 1800000
+        });
 
         collector.on('collect', async i => {
-            if (i.user.id !== interaction.user.id) return;
-
             if (i.isChannelSelectMenu() && i.customId === 'v2_set_channel') {
                 state.channelId = i.values[0];
                 return i.update(renderAdminPanel(state));
@@ -258,16 +260,13 @@ module.exports = {
                 }
 
                 if (i.customId === 'v2_execute_publish') {
-                    // On defer la bonne interaction (le clic du bouton)
                     await i.deferUpdate();
 
                     const targetChannel = await interaction.guild.channels.fetch(state.channelId).catch(() => null);
                     if (!targetChannel) {
-                        // Utilisation de i.followUp au lieu de interaction.followUp
                         return i.followUp({ content: '❌ Salon introuvable. Vérifie les permissions du bot.', ephemeral: true });
                     }
 
-                    // --- Payload du message PERMANENT ---
                     const sendPayload = {};
 
                     if (state.rawData) {
@@ -277,16 +276,15 @@ module.exports = {
                         }
                     }
 
-                    // Composants V2 compilés depuis les items parsés
                     const advancedComponents = compileComponentsV2(state, false);
 
                     if (advancedComponents.length > 0) {
                         sendPayload.components = advancedComponents;
-                        sendPayload.flags = [MessageFlags.IsComponentsV2];
+                        sendPayload.flags = MessageFlags.IsComponentsV2;
                     } else if (state.rawData?.components && state.rawData.components.length > 0) {
                         sendPayload.components = state.rawData.components;
                         const hasV2Container = state.rawData.components.some(c => c.type === 17);
-                        if (hasV2Container) sendPayload.flags = [MessageFlags.IsComponentsV2];
+                        if (hasV2Container) sendPayload.flags = MessageFlags.IsComponentsV2;
                     }
 
                     const hasContent = sendPayload.content ||
@@ -314,11 +312,9 @@ module.exports = {
                     }
 
                     try {
-                        // ✅ Envoi PERMANENT dans le salon cible
                         await targetChannel.send(sendPayload);
                         collector.stop();
 
-                        // ✅ On utilise bien i.editReply() sur l'interaction du bouton
                         return i.editReply({
                             content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`,
                             embeds: [],
@@ -327,7 +323,6 @@ module.exports = {
 
                     } catch (error) {
                         console.error('[embed.js] Erreur lors de l\'envoi :', error);
-                        // ✅ En cas d'erreur on utilise bien i.followUp()
                         return i.followUp({
                             content: `❌ Échec de l'envoi. Discord a refusé le format.\n**Détail :** \`${error.message}\``,
                             ephemeral: true
