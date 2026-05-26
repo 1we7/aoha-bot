@@ -4,23 +4,49 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('clear')
         .setDescription('Suppression de messages en masse (Salons textuels)')
-        .addIntegerOption(opt => 
+        .addStringOption(opt =>
             opt.setName('nombre')
-               .setDescription('Quantité de messages à supprimer (1-100)')
+               .setDescription('Quantité de messages à supprimer (1-100), ou "all" pour tout supprimer')
                .setRequired(true)
-               .setMinValue(1)
-               .setMaxValue(100)
         ),
-        
+
     async execute(interaction) {
-        const amount = interaction.options.getInteger('nombre');
-        
-        await interaction.channel.bulkDelete(amount, true)
-            .then(messages => {
-                interaction.reply({ content: `🧹 Opération nettoyée avec succès : **${messages.size}** messages purgés.`, ephemeral: true });
-            })
-            .catch(err => {
-                interaction.reply({ content: "❌ Erreur critique lors de la tentative de suppression (les messages datant de plus de 14 jours ne peuvent être purgés mécaniquement).", ephemeral: true });
+        const input = interaction.options.getString('nombre');
+
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            if (input.toLowerCase() === 'all') {
+                let totalDeleted = 0;
+                let batch;
+
+                do {
+                    batch = await interaction.channel.bulkDelete(100, true);
+                    totalDeleted += batch.size;
+                } while (batch.size >= 2);
+
+                return interaction.editReply({
+                    content: `🧹 Salon vidé avec succès : **${totalDeleted}** messages purgés.`
+                });
+            }
+
+            const amount = parseInt(input);
+            if (isNaN(amount) || amount < 1 || amount > 100) {
+                return interaction.editReply({
+                    content: '❌ Entrez un nombre entre 1 et 100, ou "all" pour tout supprimer.'
+                });
+            }
+
+            const messages = await interaction.channel.bulkDelete(amount, true);
+            return interaction.editReply({
+                content: `🧹 Opération réussie : **${messages.size}** messages purgés.${messages.size < amount ? `\n⚠️ ${amount - messages.size} message(s) ignoré(s) car datant de plus de 14 jours.` : ''}`
             });
+
+        } catch (err) {
+            console.error('[clear.js] Erreur :', err);
+            return interaction.editReply({
+                content: '❌ Erreur lors de la suppression. Les messages de plus de 14 jours ne peuvent pas être supprimés en masse.'
+            });
+        }
     }
 };
