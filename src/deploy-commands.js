@@ -20,11 +20,21 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 (async () => {
     try {
-        console.log(`Initialisation de l'enregistrement des requêtes applicatives (${commands.length} commandes).`);
+        console.log('Nettoyage des commandes globales...');
+        // Vide les commandes globales (au cas où)
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: [] });
+        
+        console.log('Nettoyage des commandes du serveur...');
+        // Vide les commandes du serveur
+        await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: [] });
+
+        console.log(`Injection de ${commands.length} commandes...`);
+        // Réinjecte proprement
         await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: commands },
+            { body: commands }
         );
+
         console.log('Toutes les commandes Slash ont été injectées localement avec succès.');
     } catch (error) {
         console.error(error);
