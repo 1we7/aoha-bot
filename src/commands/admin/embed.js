@@ -1,10 +1,13 @@
 const {
-    SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder,
-    TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder, ChannelType
+    SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+    ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder,
+    ChannelSelectMenuBuilder, ChannelType
 } = require('discord.js');
 const db = require('../../database');
 
-// Convertit une chaîne emoji (ex: 🌟 ou <:nom:id>) en objet pour l'API Discord
+/**
+ * Extrait et convertit une string emoji en format exploitable par l'API Discord
+ */
 function parseEmojiString(emojiStr) {
     if (!emojiStr) return null;
     const customEmojiRegex = /<a?:([a-zA-Z0-9_]+):([0-9]+)>/;
@@ -15,260 +18,364 @@ function parseEmojiString(emojiStr) {
     return { name: emojiStr };
 }
 
-// Compile l'état local au format strict Discord Components V2
+/**
+ * Compile l'état de l'application dans la structure stricte JSON Components V2 de Discord
+ */
 function compileComponentsV2(state, disableForPreview = false) {
     if (!state.items || state.items.length === 0) return [];
 
-    // On englobe tout dans un Container racine (Type 17) pour avoir la barre de couleur à gauche
-    return [
-        {
-            type: 17,
-            accent_color: state.accentColor,
-            components: state.items.map(item => {
-                if (item.type === 10) { // Text Display
-                    return { type: 10, content: item.content };
-                }
-                if (item.type === 14) { // Separator
-                    return { type: 14, spacing: 1, divider: true };
-                }
-                if (item.type === 9) { // Section (Texte + Bouton à droite)
-                    const section = {
-                        type: 9,
-                        content: item.content || ' '
-                    };
-                    if (item.button) {
-                        section.accessory = {
-                            type: 2,
-                            style: item.button.style || 1,
-                            label: item.button.label,
-                            custom_id: item.button.action_type === 'link' ? undefined : (disableForPreview ? `prev_${item.button.id}` : item.button.id),
-                            url: item.button.action_type === 'link' ? item.button.data : undefined,
-                            disabled: disableForPreview && item.button.action_type !== 'link'
-                        };
-                        if (item.button.emoji) {
-                            section.accessory.emoji = parseEmojiString(item.button.emoji);
-                        }
+    // Racine universelle : Un Container (Type 17) qui englobe l'entièreté des composants
+    const container = {
+        type: 17,
+        accent_color: state.accentColor || 9132875,
+        components: []
+    };
+
+    for (const item of state.items) {
+        if (item.type === 10) { // Text Display
+            container.components.push({
+                type: 10,
+                content: item.content
+            });
+        } 
+        else if (item.type === 14) { // Separator
+            container.components.push({
+                type: 14,
+                spacing: item.spacing || 1,
+                divider: item.divider !== false
+            });
+        } 
+        else if (item.type === 12) { // Media Gallery
+            container.components.push({
+                type: 12,
+                items: item.items || []
+            });
+        } 
+        else if (item.type === 9) { // Section (Texte + Bouton à sa droite)
+            const section = {
+                type: 9,
+                components: [
+                    {
+                        type: 10,
+                        content: item.textContent || ' '
                     }
-                    return section;
+                ]
+            };
+
+            if (item.button) {
+                const btn = {
+                    type: 2,
+                    style: item.button.style || 1,
+                    label: item.button.label || 'Bouton'
+                };
+
+                if (item.button.action_type === 'link') {
+                    btn.url = item.button.data || 'https://discord.com';
+                } else {
+                    btn.custom_id = disableForPreview ? `prev_${item.button.id}` : item.button.id;
+                    if (disableForPreview) btn.disabled = true;
                 }
-                return item;
-            })
+
+                if (item.button.emoji) {
+                    const parsedEmoji = parseEmojiString(item.button.emoji);
+                    if (parsedEmoji) btn.emoji = parsedEmoji;
+                }
+
+                section.accessory = btn;
+            }
+
+            container.components.push(section);
         }
-    ];
+    }
+
+    return [container];
 }
 
-// Rendu du panneau de contrôle d'administration
+/**
+ * Rendu visuel de l'interface d'administration (V1 standard pour l'éditeur)
+ */
 function renderAdminPanel(state) {
-    // Génère l'aperçu réel en V2
-    const previewComponents = compileComponentsV2(state, true);
+    const embed = new EmbedBuilder()
+        .setTitle('⚙️ Aoha - Constructeur de Messages Components V2')
+        .setColor(state.accentColor || 9132875)
+        .setDescription('Ajoute des blocs séquentiels à l\'intérieur de ton container natif Discord V2. Tu peux aussi importer directement un export de site externe.');
 
-    // Composants de contrôle de l'admin (V1 classique pour l'interface de gestion)
+    let compositionText = '';
+    if (state.items.length === 0) {
+        compositionText = '*Aucun composant injecté pour le moment. Remplis la liste ci-dessous.*';
+    } else {
+        state.items.forEach((item, index) => {
+            if (item.type === 10) {
+                compositionText += `\`[${index + 1}] Text Display:\` ${item.content.substring(0, 50)}...\n`;
+            } else if (item.type === 14) {
+                compositionText += `\`[${index + 1}] Separator\` (Ligne de séparation horizontale)\n`;
+            } else if (item.type === 12) {
+                compositionText += `\`[${index + 1}] Media Gallery\` (${item.items?.length || 0} image(s))\n`;
+            } else if (item.type === 9) {
+                const btnInfo = item.button ? ` [Bouton : "${item.button.label}" (${item.button.action_type})]` : '';
+                compositionText += `\`[${index + 1}] Section :\` ${item.textContent?.substring(0, 30)}...${btnInfo}\n`;
+            }
+        });
+    }
+
+    embed.addFields(
+        { name: '📋 Éléments empilés dans l\'ordre', value: compositionText },
+        { name: '📢 Salon de cible', value: state.channelId ? `<#${state.channelId}>` : '❌ Non assigné', inline: true },
+        { name: '🎨 Couleur Latérale (Int)', value: `\`${state.accentColor}\``, inline: true }
+    );
+
     const rowMenu = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder().setCustomId('v2_menu').setPlaceholder('➕ Ajouter un élément V2...').addOptions(
-            { label: 'Ajouter un Bloc Option (Section + Bouton)', value: 'add_section', emoji: '🎫', description: 'Idéal pour les tickets ou boutons d\'actions' },
-            { label: 'Ajouter un Texte Simple (Text Display)', value: 'add_text', emoji: '📄' },
-            { label: 'Ajouter un Séparateur (Separator)', value: 'add_separator', emoji: '➖' },
-            { label: 'Changer la couleur de l\'accent', value: 'edit_color', emoji: '🎨' },
-            { label: 'Importer un JSON complet', value: 'import_json_v2', emoji: '📥' }
+        new StringSelectMenuBuilder().setCustomId('v2_select_action').setPlaceholder('➕ Insérer un nouvel élément...').addOptions(
+            { label: 'Section avec Bouton (Type 9)', value: 'add_section', emoji: '🔘', description: 'Texte à gauche et bouton d\'action à droite' },
+            { label: 'Bloc de Texte (Type 10)', value: 'add_text', emoji: '📝', description: 'Paragraphe Markdown autonome' },
+            { label: 'Ligne de Séparation (Type 14)', value: 'add_separator', emoji: '➖', description: 'Ajoute de l\'espace et une bordure de démarcation' },
+            { label: 'Galerie Média (Type 12)', value: 'add_media', emoji: '🖼️', description: 'Affiche des bannières/images intégrées' }
         )
     );
 
-    const rowActions = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('v2_clear').setLabel('🗑️ Vider le dernier').setStyle(ButtonStyle.Danger).setDisabled(state.items.length === 0),
-        new ButtonBuilder().setCustomId('v2_publish').setLabel('🚀 Publier le message V2').setStyle(ButtonStyle.Primary).setDisabled(state.items.length === 0 || !state.channelId)
+    const rowAdminButtons = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('v2_set_color').setLabel('🎨 Couleur').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('v2_json_import').setLabel('📥 Importer JSON V2').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('v2_pop_item').setLabel('🗑️ Suppr Dernier').setStyle(ButtonStyle.Danger).setDisabled(state.items.length === 0),
+        new ButtonBuilder().setCustomId('v2_wipe').setLabel('💥 Tout vider').setStyle(ButtonStyle.Danger).setDisabled(state.items.length === 0)
     );
 
     const rowChannel = new ActionRowBuilder().addComponents(
-        new ChannelSelectMenuBuilder().setCustomId('v2_channel').setPlaceholder(state.channelId ? '✅ Salon sélectionné' : '📢 Choisir le salon d\'envoi').setChannelTypes([ChannelType.GuildText, ChannelType.GuildAnnouncement])
+        new ChannelSelectMenuBuilder().setCustomId('v2_set_channel').setPlaceholder('📢 Définir le salon de destination').setChannelTypes([ChannelType.GuildText, ChannelType.GuildAnnouncement])
     );
 
-    // On fusionne l'aperçu du message V2 (en haut) avec l'interface admin (en bas)
-    // Discord applique le flag 32768 au message complet
+    const rowPublish = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('v2_execute_publish').setLabel('🚀 Publier le Message V2').setStyle(ButtonStyle.Primary).setDisabled(state.items.length === 0 || !state.channelId)
+    );
+
     return {
-        content: '### 🛠️ Aoha - Constructeur de Message Components V2\n*Voici l\'aperçu de ton rendu actuel :*',
-        flags: 32768, // Active le rendu natif V2
-        components: [...previewComponents, rowMenu, rowActions, rowChannel].slice(0, 5) // Garde la limite Discord sauve
+        embeds: [embed],
+        components: [rowMenu, rowAdminButtons, rowChannel, rowPublish],
+        ephemeral: true
     };
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Créer un message natif avec la structure Discord Components V2'),
+        .setDescription('Générer un message natif utilisant la structure Discord Components V2'),
 
     async execute(interaction) {
-        // Initialisation de l'état
         const state = {
-            accentColor: 9132875, // Couleur par défaut de ta capture
+            accentColor: 9132875, // Teinte par défaut du JSON d'exemple
             channelId: null,
-            items: [] // Stocke l'arbre ordonné des éléments V2
+            items: [] // Tableau ordonné contenant la structure interne du Container V2
         };
 
-        const msg = await interaction.reply({ ...renderAdminPanel(state), ephemeral: true, withResponse: true });
+        const msg = await interaction.reply({ ...renderAdminPanel(state), withResponse: true });
         const collector = msg.resource.message.createMessageComponentCollector({ time: 1800000 });
 
         collector.on('collect', async i => {
             if (i.user.id !== interaction.user.id) return;
 
-            if (i.isChannelSelectMenu() && i.customId === 'v2_channel') {
+            // Gestion du salon de destination
+            if (i.isChannelSelectMenu() && i.customId === 'v2_set_channel') {
                 state.channelId = i.values[0];
                 return i.update(renderAdminPanel(state));
             }
 
-            if (i.isStringSelectMenu() && i.customId === 'v2_menu') {
+            // Gestion des ajouts structurels
+            if (i.isStringSelectMenu() && i.customId === 'v2_select_action') {
                 const choice = i.values[0];
 
                 if (choice === 'add_section') {
-                    // La modale exacte basée sur ta capture d'écran !
-                    const m = new ModalBuilder().setCustomId('m_v2_section').setTitle('Configurer le nouveau bouton');
+                    const m = new ModalBuilder().setCustomId('m_v2_add_section').setTitle('Section avec Bouton (Type 9)');
                     m.addComponents(
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_label').setLabel('Texte du bouton *').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ouvrir')),
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_type').setLabel('Type : link / mp / eph / ticket *').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('ticket')),
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_data').setLabel('URL ou contenu (selon le type)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Si ticket -> Entre: ROLE_ID,CATEGORY_ID')),
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('section_content').setLabel('Texte affiché à côté (optionnel)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('### Titre\nDescription ici...'))
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('text_content').setLabel('Texte de la section (Markdown)').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('### Titre du Ticket\nCliquez pour ouvrir un ticket.')),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_label').setLabel('Label du bouton').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ouvrir Ticket')),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_type').setLabel('Type d\'action (link / ticket / eph / mp)').setStyle(TextInputStyle.Short).setRequired(true).setValue('ticket')),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_data').setLabel('Données (URL, msg ou ROLE_ID,CAT_ID si ticket)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Ex si ticket : 123456789012345678,987654321098765432')),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_emoji').setLabel('Emoji du bouton (Optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('🎫'))
                     );
                     return i.showModal(m);
                 }
 
                 if (choice === 'add_text') {
-                    const m = new ModalBuilder().setCustomId('m_v2_text').setTitle('Ajouter un Text Display');
-                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('content').setLabel('Texte (Markdown supporté)').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+                    const m = new ModalBuilder().setCustomId('m_v2_add_text').setTitle('Bloc de Texte (Type 10)');
+                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('text_content').setLabel('Contenu textuel (Markdown)').setStyle(TextInputStyle.Paragraph).setRequired(true)));
                     return i.showModal(m);
                 }
 
-                if (choice === 'edit_color') {
-                    const m = new ModalBuilder().setCustomId('m_v2_color').setTitle('Modifier l\'accent du Container');
-                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('color').setLabel('Couleur Int (ex: 9132875) ou Hex (ex: #8b5cf6)').setStyle(TextInputStyle.Short).setRequired(true)));
-                    return i.showModal(m);
-                }
-
-                if (choice === 'import_json_v2') {
-                    const m = new ModalBuilder().setCustomId('m_v2_json').setTitle('Importer un JSON Components V2');
-                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('json').setLabel('Colle le JSON complet (Type 17 inclus)').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+                if (choice === 'add_media') {
+                    const m = new ModalBuilder().setCustomId('m_v2_add_media').setTitle('Galerie Média (Type 12)');
+                    m.addComponents(
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('img_url').setLabel('URL de l\'image').setStyle(TextInputStyle.Short).setRequired(true)),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('img_desc').setLabel('Description alt alternative (Optionnel)').setStyle(TextInputStyle.Short).setRequired(false))
+                    );
                     return i.showModal(m);
                 }
 
                 if (choice === 'add_separator') {
-                    state.items.push({ type: 14 });
+                    state.items.push({ type: 14, spacing: 1, divider: true });
                     return i.update(renderAdminPanel(state));
                 }
             }
 
+            // Gestion des boutons utilitaires
             if (i.isButton()) {
-                if (i.customId === 'v2_clear') {
+                if (i.customId === 'v2_pop_item') {
                     state.items.pop();
                     return i.update(renderAdminPanel(state));
                 }
+                if (i.customId === 'v2_wipe') {
+                    state.items = [];
+                    return i.update(renderAdminPanel(state));
+                }
+                if (i.customId === 'v2_set_color') {
+                    const m = new ModalBuilder().setCustomId('m_v2_set_color').setTitle('Modifier l\'accent du container');
+                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('color_value').setLabel('Code Int (ex: 9132875) ou Hex (ex: #8b5cf6)').setStyle(TextInputStyle.Short).setRequired(true).setValue(state.accentColor.toString())));
+                    return i.showModal(m);
+                }
+                if (i.customId === 'v2_json_import') {
+                    const m = new ModalBuilder().setCustomId('m_v2_json_import').setTitle('Importateur Direct Components V2');
+                    m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('json_data').setLabel('Colle le payload JSON complet').setStyle(TextInputStyle.Paragraph).setRequired(true)));
+                    return i.showModal(m);
+                }
 
-                if (i.customId === 'v2_publish') {
+                // PUBLICATION FINALE DU MESSAGE V2 NAFIF
+                if (i.customId === 'v2_execute_publish') {
                     const targetChannel = interaction.guild.channels.cache.get(state.channelId);
                     if (!targetChannel) return i.reply({ content: '❌ Salon introuvable.', ephemeral: true });
 
-                    // Génération finale des composants V2
-                    const finalComponents = compileComponentsV2(state, false);
+                    // Compilation brute pour l'API Discord
+                    const finalComponentsPayload = compileComponentsV2(state, false);
 
-                    // Enregistrement en BDD de tous les boutons interactifs programmés
+                    // Liaison dynamique en Base de données pour les boutons interactifs
                     for (const item of state.items) {
                         if (item.type === 9 && item.button && item.button.action_type !== 'link') {
-                            const dbType = item.button.action_type === 'eph' ? 'ephemeral' : item.button.action_type;
+                            const dbActionType = item.button.action_type === 'eph' ? 'ephemeral' : item.button.action_type;
                             db.prepare('INSERT OR REPLACE INTO custom_buttons (custom_id, action_type, action_data, guild_id) VALUES (?, ?, ?, ?)').run(
                                 item.button.id,
-                                dbType,
+                                dbActionType,
                                 item.button.data || '',
                                 interaction.guild.id
                             );
                         }
                     }
 
-                    // Envoi natif du message V2 sans embed
+                    // Envoi natif à l'API via le flag magique sans corps d'embed traditionnel
                     await targetChannel.send({
-                        flags: 32768,
-                        components: finalComponents
+                        flags: 32768, // Dit à Discord d'interpréter le rendu global en V2
+                        components: finalComponentsPayload
                     });
 
                     collector.stop();
-                    return i.update({ content: `✅ Message Components V2 publié avec succès dans <#${state.channelId}> !`, components: [] });
+                    return i.update({ content: `✅ Message de type Components V2 propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
                 }
             }
         });
 
-        // Gestionnaire des retours de modales
+        // Collecteur spécifique pour intercepter les retours des formulaires Modales
         const modalListener = async (mInt) => {
             if (!mInt.isModalSubmit() || mInt.user.id !== interaction.user.id) return;
 
-            if (mInt.customId === 'm_v2_section') {
-                const label = mInt.fields.getTextInputValue('btn_label');
-                const type = mInt.fields.getTextInputValue('btn_type').toLowerCase().trim();
-                const data = mInt.fields.getTextInputValue('btn_data');
-                const content = mInt.fields.getTextInputValue('section_content');
+            if (mInt.customId === 'm_v2_add_section') {
+                const textContent = mInt.fields.getTextInputValue('text_content');
+                const btnLabel = mInt.fields.getTextInputValue('btn_label');
+                const btnType = mInt.fields.getTextInputValue('btn_type').toLowerCase().trim();
+                const btnData = mInt.fields.getTextInputValue('btn_data');
+                const btnEmoji = mInt.fields.getTextInputValue('btn_emoji');
 
-                const buttonId = `v2_btn_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+                const generatedBtnId = `v2_action_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
                 state.items.push({
-                    type: 9, // Toujours structure en Section pour aligner à droite
-                    content: content || ' ',
+                    type: 9,
+                    textContent: textContent,
                     button: {
-                        id: buttonId,
-                        label: label,
-                        action_type: type,
-                        data: data,
-                        style: type === 'link' ? 5 : 1 // Style lien ou primaire par défaut
+                        id: generatedBtnId,
+                        label: btnLabel,
+                        action_type: btnType,
+                        data: btnData,
+                        emoji: btnEmoji,
+                        style: btnType === 'link' ? 5 : 1 // Style Lien si URL, sinon bleu standard
                     }
                 });
             }
 
-            if (mInt.customId === 'm_v2_text') {
+            if (mInt.customId === 'm_v2_add_text') {
                 state.items.push({
                     type: 10,
-                    content: mInt.fields.getTextInputValue('content')
+                    content: mInt.fields.getTextInputValue('text_content')
                 });
             }
 
-            if (mInt.customId === 'm_v2_color') {
-                const inputColor = mInt.fields.getTextInputValue('color').trim();
-                if (inputColor.startsWith('#')) {
-                    state.accentColor = parseInt(inputColor.replace('#', ''), 16);
+            if (mInt.customId === 'm_v2_add_media') {
+                state.items.push({
+                    type: 12,
+                    items: [{
+                        media: { url: mInt.fields.getTextInputValue('img_url') },
+                        description: mInt.fields.getTextInputValue('img_desc') || undefined
+                    }]
+                });
+            }
+
+            if (mInt.customId === 'm_v2_set_color') {
+                const rawColor = mInt.fields.getTextInputValue('color_value').trim();
+                if (rawColor.startsWith('#')) {
+                    state.accentColor = parseInt(rawColor.replace('#', ''), 16);
                 } else {
-                    state.accentColor = parseInt(inputColor) || 9132875;
+                    state.accentColor = parseInt(rawColor) || 9132875;
                 }
             }
 
-            if (mInt.customId === 'm_v2_json') {
+            if (mInt.customId === 'm_v2_json_import') {
                 try {
-                    const parsed = JSON.parse(mInt.fields.getTextInputValue('json'));
-                    const componentsRoot = parsed.components || parsed;
+                    const jsonRaw = mInt.fields.getTextInputValue('json_data');
+                    const parsed = JSON.parse(jsonRaw);
+                    
+                    let rootArray = null;
+                    if (parsed.components) rootArray = parsed.components;
+                    else if (Array.isArray(parsed)) rootArray = parsed;
+                    else if (parsed.type === 17) rootArray = [parsed];
 
-                    if (Array.isArray(componentsRoot)) {
+                    if (Array.isArray(rootArray)) {
                         state.items = [];
-                        for (const comp of componentsRoot) {
-                            if (comp.type === 17) { // Extraction depuis le container racine
-                                if (comp.accent_color) state.accentColor = comp.accent_color;
-                                if (comp.components) {
-                                    for (const child of comp.components) {
-                                        if (child.type === 9) { // Section convertie pour notre éditeur
-                                            let btnData = null;
+                        for (const rootComp of rootArray) {
+                            if (rootComp.type === 17) {
+                                if (rootComp.accent_color) state.accentColor = rootComp.accent_color;
+                                if (Array.isArray(rootComp.components)) {
+                                    for (const child of rootComp.components) {
+                                        if (child.type === 10) {
+                                            state.items.push({ type: 10, content: child.content || '' });
+                                        } else if (child.type === 14) {
+                                            state.items.push({ type: 14, spacing: child.spacing || 1, divider: child.divider !== false });
+                                        } else if (child.type === 12) {
+                                            state.items.push({ type: 12, items: child.items || [] });
+                                        } else if (child.type === 9) {
+                                            let textVal = '';
+                                            if (Array.isArray(child.components) && child.components[0]) {
+                                                textVal = child.components[0].content || '';
+                                            }
+                                            let btnObj = null;
                                             if (child.accessory && child.accessory.type === 2) {
-                                                btnData = {
+                                                let emojiString = '';
+                                                if (child.accessory.emoji) {
+                                                    const em = child.accessory.emoji;
+                                                    emojiString = em.id ? `<:${em.name}:${em.id}>` : em.name;
+                                                }
+                                                btnObj = {
                                                     id: child.accessory.custom_id || `v2_btn_${Date.now()}`,
                                                     label: child.accessory.label || 'Ouvrir',
+                                                    style: child.accessory.style || 1,
                                                     action_type: child.accessory.url ? 'link' : 'ticket',
                                                     data: child.accessory.url || '',
-                                                    style: child.accessory.style || 1
+                                                    emoji: emojiString
                                                 };
                                             }
-                                            state.items.push({ type: 9, content: child.content, button: btnData });
-                                        } else {
-                                            state.items.push(child);
+                                            state.items.push({ type: 9, textContent: textVal, button: btnObj });
                                         }
                                     }
                                 }
-                            } else {
-                                state.items.push(comp);
                             }
                         }
                     }
-                } catch (e) {
-                    return mInt.reply({ content: '❌ Code JSON V2 invalide.', ephemeral: true });
+                } catch (err) {
+                    return mInt.reply({ content: '❌ Structure JSON V2 invalide ou incompatible.', ephemeral: true });
                 }
             }
 
