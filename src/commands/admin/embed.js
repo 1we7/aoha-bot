@@ -71,7 +71,7 @@ function compileComponentsV2(state, disableForPreview = false) {
 
 function renderAdminPanel(state) {
     const embed = new EmbedBuilder()
-        .setTitle('⚙️ Aoha - Émetteur de Messages Components V2')
+        .setTitle('⚙️ Aoha - Émetteur de Messages')
         .setColor(state.accentColor || 9132875)
         .setDescription('Colle directement le payload JSON généré depuis un éditeur externe pour l\'envoyer dans le salon de ton choix.');
 
@@ -80,9 +80,9 @@ function renderAdminPanel(state) {
         compositionText = '*Aucun composant chargé. Utilise le bouton d\'importation ci-dessous.*';
     } else {
         state.items.forEach((item, index) => {
-            if (item.type === 10) compositionText += `\`[${index + 1}] Text Display\`\n`;
-            else if (item.type === 14) compositionText += `\`[${index + 1}] Separator\`\n`;
-            else if (item.type === 12) compositionText += `\`[${index + 1}] Media Gallery\`\n`;
+            if (item.type === 10) compositionText += `\`[${index + 1}] Texte\`\n`;
+            else if (item.type === 14) compositionText += `\`[${index + 1}] Séparateur\`\n`;
+            else if (item.type === 12) compositionText += `\`[${index + 1}] Galerie Média\`\n`;
             else if (item.type === 9) compositionText += `\`[${index + 1}] Section d'action\`\n`;
         });
     }
@@ -134,7 +134,7 @@ function renderAdminPanel(state) {
     const rowPublish = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('v2_execute_publish')
-            .setLabel('🚀 Publier le Message V2')
+            .setLabel('🚀 Publier le message')
             .setStyle(ButtonStyle.Primary)
             .setDisabled(state.items.length === 0 || !state.channelId)
     );
@@ -150,7 +150,7 @@ function renderAdminPanel(state) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Générer et publier un message natif Discord Components V2 via JSON'),
+        .setDescription('Générer et publier un message natif Discord via JSON'),
 
     async execute(interaction) {
         const state = {
@@ -178,7 +178,7 @@ module.exports = {
 
                 if (i.customId === 'v2_json_import') {
                     const uniqueId = `m_v2_json_import_${i.id}`;
-                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Importateur Direct Components V2');
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Importateur Direct JSON');
                     m.addComponents(
                         new ActionRowBuilder().addComponents(
                             new TextInputBuilder()
@@ -234,7 +234,7 @@ module.exports = {
                                                         action_type: child.accessory.url ? 'link' : 'ticket',
                                                         data: child.accessory.url || '',
                                                         emoji: emojiString
-                        };
+                                                    };
                                                 }
                                                 state.items.push({ type: 9, textContent: textVal, button: btnObj });
                                             }
@@ -245,16 +245,18 @@ module.exports = {
                         }
                         return mInt.update(renderAdminPanel(state));
                     } catch (err) {
-                        return mInt.reply({ content: '❌ Structure JSON V2 invalide ou corrompue.', ephemeral: true });
+                        return mInt.reply({ content: '❌ Structure JSON invalide ou corrompue.', ephemeral: true });
                     }
                 }
 
                 if (i.customId === 'v2_execute_publish') {
                     await i.deferUpdate();
 
-                    const targetChannel = interaction.guild.channels.cache.get(state.channelId);
+                    // Sécurisation : Utilisation de fetch() au lieu de cache.get()
+                    const targetChannel = await interaction.guild.channels.fetch(state.channelId).catch(() => null);
+                    
                     if (!targetChannel) {
-                        return interaction.followUp({ content: '❌ Salon introuvable.', ephemeral: true });
+                        return interaction.followUp({ content: '❌ Salon introuvable. Assure-toi que le bot a les permissions de le voir.', ephemeral: true });
                     }
 
                     const finalComponentsPayload = compileComponentsV2(state, false);
@@ -271,13 +273,20 @@ module.exports = {
                         }
                     }
 
-                    await targetChannel.send({
-                        flags: [MessageFlags.IsComponentsV2],
-                        components: finalComponentsPayload
-                    });
+                    // Ajout d'un bloc Try/Catch pour capturer les erreurs d'envoi de Discord
+                    try {
+                        await targetChannel.send({
+                            flags: [MessageFlags.IsComponentsV2],
+                            components: finalComponentsPayload
+                        });
 
-                    collector.stop();
-                    return interaction.editReply({ content: `✅ Message de type Components V2 propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
+                        collector.stop();
+                        return interaction.editReply({ content: `✅ Message propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
+                        
+                    } catch (error) {
+                        console.error('Erreur lors de la publication :', error);
+                        return interaction.followUp({ content: `❌ Impossible d'envoyer le message. Discord a rejeté la requête.\n**Erreur technique :** \`${error.message}\``, ephemeral: true });
+                    }
                 }
             }
         });
