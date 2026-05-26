@@ -3,11 +3,9 @@ const {
     ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder,
     ChannelSelectMenuBuilder, ChannelType
 } = require('discord.js');
+
 const db = require('../../database');
 
-/**
- * Extrait et convertit une string emoji en format exploitable par l'API Discord
- */
 function parseEmojiString(emojiStr) {
     if (!emojiStr) return null;
     const customEmojiRegex = /<a?:([a-zA-Z0-9_]+):([0-9]+)>/;
@@ -18,13 +16,9 @@ function parseEmojiString(emojiStr) {
     return { name: emojiStr };
 }
 
-/**
- * Compile l'état de l'application dans la structure stricte JSON Components V2 de Discord
- */
 function compileComponentsV2(state, disableForPreview = false) {
     if (!state.items || state.items.length === 0) return [];
 
-    // Racine universelle : Un Container (Type 17) qui englobe l'entièreté des composants
     const container = {
         type: 17,
         accent_color: state.accentColor || 9132875,
@@ -32,34 +26,16 @@ function compileComponentsV2(state, disableForPreview = false) {
     };
 
     for (const item of state.items) {
-        if (item.type === 10) { // Text Display
-            container.components.push({
-                type: 10,
-                content: item.content
-            });
-        } 
-        else if (item.type === 14) { // Separator
-            container.components.push({
-                type: 14,
-                spacing: item.spacing || 1,
-                divider: item.divider !== false
-            });
-        } 
-        else if (item.type === 12) { // Media Gallery
-            container.components.push({
-                type: 12,
-                items: item.items || []
-            });
-        } 
-        else if (item.type === 9) { // Section (Texte + Bouton à sa droite)
+        if (item.type === 10) {
+            container.components.push({ type: 10, content: item.content });
+        } else if (item.type === 14) {
+            container.components.push({ type: 14, spacing: item.spacing || 1, divider: item.divider !== false });
+        } else if (item.type === 12) {
+            container.components.push({ type: 12, items: item.items || [] });
+        } else if (item.type === 9) {
             const section = {
                 type: 9,
-                components: [
-                    {
-                        type: 10,
-                        content: item.textContent || ' '
-                    }
-                ]
+                components: [{ type: 10, content: item.textContent || ' ' }]
             };
 
             if (item.button) {
@@ -91,9 +67,6 @@ function compileComponentsV2(state, disableForPreview = false) {
     return [container];
 }
 
-/**
- * Rendu visuel de l'interface d'administration (V1 standard pour l'éditeur)
- */
 function renderAdminPanel(state) {
     const embed = new EmbedBuilder()
         .setTitle('⚙️ Aoha - Constructeur de Messages Components V2')
@@ -162,24 +135,32 @@ module.exports = {
 
     async execute(interaction) {
         const state = {
-            accentColor: 9132875, // Teinte par défaut du JSON d'exemple
+            accentColor: 9132875,
             channelId: null,
-            items: [] // Tableau ordonné contenant la structure interne du Container V2
+            items: []
         };
 
         const msg = await interaction.reply({ ...renderAdminPanel(state), withResponse: true });
         const collector = msg.resource.message.createMessageComponentCollector({ time: 1800000 });
 
+        // FIX 1 : fonction utilitaire pour rafraîchir le panneau depuis n'importe quel contexte
+        // (component interaction OU modal interaction avec message original)
+        async function refreshPanel(i, useFollowup = false) {
+            if (useFollowup) {
+                // Depuis une modale : on edit le message original via l'interaction slash d'origine
+                return interaction.editReply(renderAdminPanel(state));
+            }
+            return i.update(renderAdminPanel(state));
+        }
+
         collector.on('collect', async i => {
             if (i.user.id !== interaction.user.id) return;
 
-            // Gestion du salon de destination
             if (i.isChannelSelectMenu() && i.customId === 'v2_set_channel') {
                 state.channelId = i.values[0];
                 return i.update(renderAdminPanel(state));
             }
 
-            // Gestion des ajouts structurels
             if (i.isStringSelectMenu() && i.customId === 'v2_select_action') {
                 const choice = i.values[0];
 
@@ -216,7 +197,6 @@ module.exports = {
                 }
             }
 
-            // Gestion des boutons utilitaires
             if (i.isButton()) {
                 if (i.customId === 'v2_pop_item') {
                     state.items.pop();
@@ -237,15 +217,17 @@ module.exports = {
                     return i.showModal(m);
                 }
 
-                // PUBLICATION FINALE DU MESSAGE V2 NAFIF
+                // FIX 2 : deferUpdate avant l'opération async pour éviter le timeout d'interaction
                 if (i.customId === 'v2_execute_publish') {
-                    const targetChannel = interaction.guild.channels.cache.get(state.channelId);
-                    if (!targetChannel) return i.reply({ content: '❌ Salon introuvable.', ephemeral: true });
+                    await i.deferUpdate();
 
-                    // Compilation brute pour l'API Discord
+                    const targetChannel = interaction.guild.channels.cache.get(state.channelId);
+                    if (!targetChannel) {
+                        return interaction.followUp({ content: '❌ Salon introuvable.', ephemeral: true });
+                    }
+
                     const finalComponentsPayload = compileComponentsV2(state, false);
 
-                    // Liaison dynamique en Base de données pour les boutons interactifs
                     for (const item of state.items) {
                         if (item.type === 9 && item.button && item.button.action_type !== 'link') {
                             const dbActionType = item.button.action_type === 'eph' ? 'ephemeral' : item.button.action_type;
@@ -258,21 +240,27 @@ module.exports = {
                         }
                     }
 
-                    // Envoi natif à l'API via le flag magique sans corps d'embed traditionnel
                     await targetChannel.send({
-                        flags: 32768, // Dit à Discord d'interpréter le rendu global en V2
+                        flags: 32768,
                         components: finalComponentsPayload
                     });
 
                     collector.stop();
-                    return i.update({ content: `✅ Message de type Components V2 propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
+                    return interaction.editReply({ content: `✅ Message de type Components V2 propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
                 }
             }
         });
 
-        // Collecteur spécifique pour intercepter les retours des formulaires Modales
+        // FIX 3 : collecteur de modales corrigé — deferUpdate + editReply au lieu de mInt.update()
         const modalListener = async (mInt) => {
             if (!mInt.isModalSubmit() || mInt.user.id !== interaction.user.id) return;
+
+            // On vérifie que la modale appartient bien à cette session
+            const knownModals = ['m_v2_add_section', 'm_v2_add_text', 'm_v2_add_media', 'm_v2_set_color', 'm_v2_json_import'];
+            if (!knownModals.includes(mInt.customId)) return;
+
+            // Accuser réception immédiatement pour éviter "cette interaction a échoué"
+            await mInt.deferUpdate();
 
             if (mInt.customId === 'm_v2_add_section') {
                 const textContent = mInt.fields.getTextInputValue('text_content');
@@ -292,7 +280,7 @@ module.exports = {
                         action_type: btnType,
                         data: btnData,
                         emoji: btnEmoji,
-                        style: btnType === 'link' ? 5 : 1 // Style Lien si URL, sinon bleu standard
+                        style: btnType === 'link' ? 5 : 1
                     }
                 });
             }
@@ -327,7 +315,7 @@ module.exports = {
                 try {
                     const jsonRaw = mInt.fields.getTextInputValue('json_data');
                     const parsed = JSON.parse(jsonRaw);
-                    
+
                     let rootArray = null;
                     if (parsed.components) rootArray = parsed.components;
                     else if (Array.isArray(parsed)) rootArray = parsed;
@@ -375,11 +363,13 @@ module.exports = {
                         }
                     }
                 } catch (err) {
-                    return mInt.reply({ content: '❌ Structure JSON V2 invalide ou incompatible.', ephemeral: true });
+                    // deferUpdate est déjà envoyé, on utilise followUp pour l'erreur
+                    return interaction.followUp({ content: '❌ Structure JSON V2 invalide ou incompatible.', ephemeral: true });
                 }
             }
 
-            await mInt.update(renderAdminPanel(state));
+            // Rafraîchissement du panneau via editReply sur l'interaction slash d'origine
+            await interaction.editReply(renderAdminPanel(state));
         };
 
         interaction.client.on('interactionCreate', modalListener);
