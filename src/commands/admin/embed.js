@@ -65,7 +65,7 @@ function compileComponentsV2(state) {
                     if (parsedEmoji) btn.setEmoji(parsedEmoji);
                 }
 
-                section.setAccessory(btn);
+                section.setButtonAccessory(btn);
             }
 
             container.addSectionComponents(section);
