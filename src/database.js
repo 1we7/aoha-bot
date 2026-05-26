@@ -1,7 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// Initialisation de la BDD locale (Railway conserve le volume si configuré, ou recrée à la volée)
 const db = new Database(path.join(__dirname, '../database.sqlite'));
 
 db.exec(`
@@ -24,6 +23,14 @@ db.exec(`
         action_type TEXT,
         action_data TEXT,
         guild_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS warns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        guild_id TEXT,
+        reason TEXT,
+        moderator_id TEXT,
+        created_at INTEGER
     );
 `);
 
