@@ -237,7 +237,7 @@ function parseJsonIntoState(parsed, state) {
                         emojiString = em.id ? `<:${em.name}:${em.id}>` : em.name;
                     }
                     btnObj = {
-                        id: child.accessory.custom_id || `btn_${Date.now()}`,
+                        id: `${child.accessory.custom_id || 'btn'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                         label: child.accessory.label || 'Ouvrir',
                         style: child.accessory.style || 1,
                         action_type: child.accessory.url ? 'link' : 'ticket',
