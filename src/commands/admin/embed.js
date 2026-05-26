@@ -1,7 +1,8 @@
 const {
     SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
     ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder,
-    ChannelSelectMenuBuilder, ChannelType
+    ChannelSelectMenuBuilder, ChannelType, MessageFlags,
+    ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SectionBuilder, MediaGalleryBuilder
 } = require('discord.js');
 
 const db = require('../../database');
@@ -16,51 +17,60 @@ function parseEmojiString(emojiStr) {
     return { name: emojiStr };
 }
 
+// Utilisation des Builders Natifs Discord.js V2 comme suggéré par Claude
 function compileComponentsV2(state, disableForPreview = false) {
     if (!state.items || state.items.length === 0) return [];
 
-    const container = {
-        type: 17,
-        accent_color: state.accentColor || 9132875,
-        components: []
-    };
+    const container = new ContainerBuilder()
+        .setAccentColor(state.accentColor || 9132875);
 
     for (const item of state.items) {
         if (item.type === 10) {
-            container.components.push({ type: 10, content: item.content });
+            container.addComponent(
+                new TextDisplayBuilder().setContent(item.content)
+            );
         } else if (item.type === 14) {
-            container.components.push({ type: 14, spacing: item.spacing || 1, divider: item.divider !== false });
+            container.addComponent(
+                new SeparatorBuilder()
+                    .setSpacing(item.spacing || 1)
+                    .setDivider(item.divider !== false)
+            );
         } else if (item.type === 12) {
-            container.components.push({ type: 12, items: item.items || [] });
+            const gallery = new MediaGalleryBuilder();
+            if (item.items) {
+                for (const mediaItem of item.items) {
+                    gallery.addItems({
+                        media: { url: mediaItem.media?.url || mediaItem.url },
+                        description: mediaItem.description
+                    });
+                }
+            }
+            container.addComponent(gallery);
         } else if (item.type === 9) {
-            const section = {
-                type: 9,
-                components: [{ type: 10, content: item.textContent || ' ' }]
-            };
+            const section = new SectionBuilder()
+                .addComponent(new TextDisplayBuilder().setContent(item.textContent || ' '));
 
             if (item.button) {
-                const btn = {
-                    type: 2,
-                    style: item.button.style || 1,
-                    label: item.button.label || 'Bouton'
-                };
+                const btn = new ButtonBuilder()
+                    .setStyle(item.button.style || ButtonStyle.Primary)
+                    .setLabel(item.button.label || 'Bouton');
 
                 if (item.button.action_type === 'link') {
-                    btn.url = item.button.data || 'https://discord.com';
+                    btn.setURL(item.button.data || 'https://discord.com');
                 } else {
-                    btn.custom_id = disableForPreview ? `prev_${item.button.id}` : item.button.id;
-                    if (disableForPreview) btn.disabled = true;
+                    btn.setCustomId(disableForPreview ? `prev_${item.button.id}` : item.button.id);
+                    if (disableForPreview) btn.setDisabled(true);
                 }
 
                 if (item.button.emoji) {
                     const parsedEmoji = parseEmojiString(item.button.emoji);
-                    if (parsedEmoji) btn.emoji = parsedEmoji;
+                    if (parsedEmoji) btn.setEmoji(parsedEmoji);
                 }
 
-                section.accessory = btn;
+                section.setAccessory(btn);
             }
 
-            container.components.push(section);
+            container.addComponent(section);
         }
     }
 
@@ -143,16 +153,6 @@ module.exports = {
         const msg = await interaction.reply({ ...renderAdminPanel(state), withResponse: true });
         const collector = msg.resource.message.createMessageComponentCollector({ time: 1800000 });
 
-        // FIX 1 : fonction utilitaire pour rafraîchir le panneau depuis n'importe quel contexte
-        // (component interaction OU modal interaction avec message original)
-        async function refreshPanel(i, useFollowup = false) {
-            if (useFollowup) {
-                // Depuis une modale : on edit le message original via l'interaction slash d'origine
-                return interaction.editReply(renderAdminPanel(state));
-            }
-            return i.update(renderAdminPanel(state));
-        }
-
         collector.on('collect', async i => {
             if (i.user.id !== interaction.user.id) return;
 
@@ -165,7 +165,8 @@ module.exports = {
                 const choice = i.values[0];
 
                 if (choice === 'add_section') {
-                    const m = new ModalBuilder().setCustomId('m_v2_add_section').setTitle('Section avec Bouton (Type 9)');
+                    const uniqueId = `m_v2_add_section_${i.id}`;
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Section avec Bouton (Type 9)');
                     m.addComponents(
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('text_content').setLabel('Texte de la section (Markdown)').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('### Titre du Ticket\nCliquez pour ouvrir un ticket.')),
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_label').setLabel('Label du bouton').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ouvrir Ticket')),
@@ -173,22 +174,74 @@ module.exports = {
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_data').setLabel('Données (URL, msg ou ROLE_ID,CAT_ID si ticket)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Ex si ticket : 123456789012345678,987654321098765432')),
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('btn_emoji').setLabel('Emoji du bouton (Optionnel)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('🎫'))
                     );
-                    return i.showModal(m);
+                    await i.showModal(m);
+
+                    // Attente inline de la modale pour éviter les fuites d'events
+                    const mInt = await i.awaitModalSubmit({ filter: mi => mi.customId === uniqueId, time: 900000 }).catch(() => null);
+                    if (!mInt) return;
+
+                    const textContent = mInt.fields.getTextInputValue('text_content');
+                    const btnLabel = mInt.fields.getTextInputValue('btn_label');
+                    const btnType = mInt.fields.getTextInputValue('btn_type').toLowerCase().trim();
+                    const btnData = mInt.fields.getTextInputValue('btn_data');
+                    const btnEmoji = mInt.fields.getTextInputValue('btn_emoji');
+                    const generatedBtnId = `v2_action_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+
+                    state.items.push({
+                        type: 9,
+                        textContent: textContent,
+                        button: {
+                            id: generatedBtnId,
+                            label: btnLabel,
+                            action_type: btnType,
+                            data: btnData,
+                            emoji: btnEmoji,
+                            style: btnType === 'link' ? 5 : 1
+                        }
+                    });
+
+                    // mInt.update() fonctionne parfaitement ici et met à jour le panel de contrôle d'un coup
+                    return mInt.update(renderAdminPanel(state));
                 }
 
                 if (choice === 'add_text') {
-                    const m = new ModalBuilder().setCustomId('m_v2_add_text').setTitle('Bloc de Texte (Type 10)');
+                    const uniqueId = `m_v2_add_text_${i.id}`;
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Bloc de Texte (Type 10)');
                     m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('text_content').setLabel('Contenu textuel (Markdown)').setStyle(TextInputStyle.Paragraph).setRequired(true)));
-                    return i.showModal(m);
+                    await i.showModal(m);
+
+                    const mInt = await i.awaitModalSubmit({ filter: mi => mi.customId === uniqueId, time: 900000 }).catch(() => null);
+                    if (!mInt) return;
+
+                    state.items.push({
+                        type: 10,
+                        content: mInt.fields.getTextInputValue('text_content')
+                    });
+
+                    return mInt.update(renderAdminPanel(state));
                 }
 
                 if (choice === 'add_media') {
-                    const m = new ModalBuilder().setCustomId('m_v2_add_media').setTitle('Galerie Média (Type 12)');
+                    const uniqueId = `m_v2_add_media_${i.id}`;
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Galerie Média (Type 12)');
                     m.addComponents(
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('img_url').setLabel('URL de l\'image').setStyle(TextInputStyle.Short).setRequired(true)),
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('img_desc').setLabel('Description alt alternative (Optionnel)').setStyle(TextInputStyle.Short).setRequired(false))
                     );
-                    return i.showModal(m);
+                    await i.showModal(m);
+
+                    const mInt = await i.awaitModalSubmit({ filter: mi => mi.customId === uniqueId, time: 900000 }).catch(() => null);
+                    if (!mInt) return;
+
+                    state.items.push({
+                        type: 12,
+                        items: [{
+                            media: { url: mInt.fields.getTextInputValue('img_url') },
+                            description: mInt.fields.getTextInputValue('img_desc') || undefined
+                        }]
+                    });
+
+                    return mInt.update(renderAdminPanel(state));
                 }
 
                 if (choice === 'add_separator') {
@@ -207,17 +260,88 @@ module.exports = {
                     return i.update(renderAdminPanel(state));
                 }
                 if (i.customId === 'v2_set_color') {
-                    const m = new ModalBuilder().setCustomId('m_v2_set_color').setTitle('Modifier l\'accent du container');
+                    const uniqueId = `m_v2_set_color_${i.id}`;
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Modifier l\'accent du container');
                     m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('color_value').setLabel('Code Int (ex: 9132875) ou Hex (ex: #8b5cf6)').setStyle(TextInputStyle.Short).setRequired(true).setValue(state.accentColor.toString())));
-                    return i.showModal(m);
+                    await i.showModal(m);
+
+                    const mInt = await i.awaitModalSubmit({ filter: mi => mi.customId === uniqueId, time: 900000 }).catch(() => null);
+                    if (!mInt) return;
+
+                    const rawColor = mInt.fields.getTextInputValue('color_value').trim();
+                    if (rawColor.startsWith('#')) {
+                        state.accentColor = parseInt(rawColor.replace('#', ''), 16);
+                    } else {
+                        state.accentColor = parseInt(rawColor) || 9132875;
+                    }
+
+                    return mInt.update(renderAdminPanel(state));
                 }
                 if (i.customId === 'v2_json_import') {
-                    const m = new ModalBuilder().setCustomId('m_v2_json_import').setTitle('Importateur Direct Components V2');
+                    const uniqueId = `m_v2_json_import_${i.id}`;
+                    const m = new ModalBuilder().setCustomId(uniqueId).setTitle('Importateur Direct Components V2');
                     m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('json_data').setLabel('Colle le payload JSON complet').setStyle(TextInputStyle.Paragraph).setRequired(true)));
-                    return i.showModal(m);
+                    await i.showModal(m);
+
+                    const mInt = await i.awaitModalSubmit({ filter: mi => mi.customId === uniqueId, time: 900000 }).catch(() => null);
+                    if (!mInt) return;
+
+                    try {
+                        const jsonRaw = mInt.fields.getTextInputValue('json_data');
+                        const parsed = JSON.parse(jsonRaw);
+
+                        let rootArray = null;
+                        if (parsed.components) rootArray = parsed.components;
+                        else if (Array.isArray(parsed)) rootArray = parsed;
+                        else if (parsed.type === 17) rootArray = [parsed];
+
+                        if (Array.isArray(rootArray)) {
+                            state.items = [];
+                            for (const rootComp of rootArray) {
+                                if (rootComp.type === 17) {
+                                    if (rootComp.accent_color) state.accentColor = rootComp.accent_color;
+                                    if (Array.isArray(rootComp.components)) {
+                                        for (const child of rootComp.components) {
+                                            if (child.type === 10) {
+                                                state.items.push({ type: 10, content: child.content || '' });
+                                            } else if (child.type === 14) {
+                                                state.items.push({ type: 14, spacing: child.spacing || 1, divider: child.divider !== false });
+                                            } else if (child.type === 12) {
+                                                state.items.push({ type: 12, items: child.items || [] });
+                                            } else if (child.type === 9) {
+                                                let textVal = '';
+                                                if (Array.isArray(child.components) && child.components[0]) {
+                                                    textVal = child.components[0].content || '';
+                                                }
+                                                let btnObj = null;
+                                                if (child.accessory && child.accessory.type === 2) {
+                                                    let emojiString = '';
+                                                    if (child.accessory.emoji) {
+                                                        const em = child.accessory.emoji;
+                                                        emojiString = em.id ? `<:${em.name}:${em.id}>` : em.name;
+                                                    }
+                                                    btnObj = {
+                                                        id: child.accessory.custom_id || `v2_btn_${Date.now()}`,
+                                                        label: child.accessory.label || 'Ouvrir',
+                                                        style: child.accessory.style || 1,
+                                                        action_type: child.accessory.url ? 'link' : 'ticket',
+                                                        data: child.accessory.url || '',
+                                                        emoji: emojiString
+                                                    };
+                                                }
+                                                state.items.push({ type: 9, textContent: textVal, button: btnObj });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return mInt.update(renderAdminPanel(state));
+                    } catch (err) {
+                        return mInt.reply({ content: '❌ Structure JSON V2 invalide ou incompatible.', ephemeral: true });
+                    }
                 }
 
-                // FIX 2 : deferUpdate avant l'opération async pour éviter le timeout d'interaction
                 if (i.customId === 'v2_execute_publish') {
                     await i.deferUpdate();
 
@@ -240,8 +364,9 @@ module.exports = {
                         }
                     }
 
+                    // Correction du Flag de publication
                     await targetChannel.send({
-                        flags: 32768,
+                        flags: [MessageFlags.IsComponentsV2],
                         components: finalComponentsPayload
                     });
 
@@ -250,129 +375,5 @@ module.exports = {
                 }
             }
         });
-
-        // FIX 3 : collecteur de modales corrigé — deferUpdate + editReply au lieu de mInt.update()
-        const modalListener = async (mInt) => {
-            if (!mInt.isModalSubmit() || mInt.user.id !== interaction.user.id) return;
-
-            // On vérifie que la modale appartient bien à cette session
-            const knownModals = ['m_v2_add_section', 'm_v2_add_text', 'm_v2_add_media', 'm_v2_set_color', 'm_v2_json_import'];
-            if (!knownModals.includes(mInt.customId)) return;
-
-            // Accuser réception immédiatement pour éviter "cette interaction a échoué"
-            await mInt.deferUpdate();
-
-            if (mInt.customId === 'm_v2_add_section') {
-                const textContent = mInt.fields.getTextInputValue('text_content');
-                const btnLabel = mInt.fields.getTextInputValue('btn_label');
-                const btnType = mInt.fields.getTextInputValue('btn_type').toLowerCase().trim();
-                const btnData = mInt.fields.getTextInputValue('btn_data');
-                const btnEmoji = mInt.fields.getTextInputValue('btn_emoji');
-
-                const generatedBtnId = `v2_action_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-
-                state.items.push({
-                    type: 9,
-                    textContent: textContent,
-                    button: {
-                        id: generatedBtnId,
-                        label: btnLabel,
-                        action_type: btnType,
-                        data: btnData,
-                        emoji: btnEmoji,
-                        style: btnType === 'link' ? 5 : 1
-                    }
-                });
-            }
-
-            if (mInt.customId === 'm_v2_add_text') {
-                state.items.push({
-                    type: 10,
-                    content: mInt.fields.getTextInputValue('text_content')
-                });
-            }
-
-            if (mInt.customId === 'm_v2_add_media') {
-                state.items.push({
-                    type: 12,
-                    items: [{
-                        media: { url: mInt.fields.getTextInputValue('img_url') },
-                        description: mInt.fields.getTextInputValue('img_desc') || undefined
-                    }]
-                });
-            }
-
-            if (mInt.customId === 'm_v2_set_color') {
-                const rawColor = mInt.fields.getTextInputValue('color_value').trim();
-                if (rawColor.startsWith('#')) {
-                    state.accentColor = parseInt(rawColor.replace('#', ''), 16);
-                } else {
-                    state.accentColor = parseInt(rawColor) || 9132875;
-                }
-            }
-
-            if (mInt.customId === 'm_v2_json_import') {
-                try {
-                    const jsonRaw = mInt.fields.getTextInputValue('json_data');
-                    const parsed = JSON.parse(jsonRaw);
-
-                    let rootArray = null;
-                    if (parsed.components) rootArray = parsed.components;
-                    else if (Array.isArray(parsed)) rootArray = parsed;
-                    else if (parsed.type === 17) rootArray = [parsed];
-
-                    if (Array.isArray(rootArray)) {
-                        state.items = [];
-                        for (const rootComp of rootArray) {
-                            if (rootComp.type === 17) {
-                                if (rootComp.accent_color) state.accentColor = rootComp.accent_color;
-                                if (Array.isArray(rootComp.components)) {
-                                    for (const child of rootComp.components) {
-                                        if (child.type === 10) {
-                                            state.items.push({ type: 10, content: child.content || '' });
-                                        } else if (child.type === 14) {
-                                            state.items.push({ type: 14, spacing: child.spacing || 1, divider: child.divider !== false });
-                                        } else if (child.type === 12) {
-                                            state.items.push({ type: 12, items: child.items || [] });
-                                        } else if (child.type === 9) {
-                                            let textVal = '';
-                                            if (Array.isArray(child.components) && child.components[0]) {
-                                                textVal = child.components[0].content || '';
-                                            }
-                                            let btnObj = null;
-                                            if (child.accessory && child.accessory.type === 2) {
-                                                let emojiString = '';
-                                                if (child.accessory.emoji) {
-                                                    const em = child.accessory.emoji;
-                                                    emojiString = em.id ? `<:${em.name}:${em.id}>` : em.name;
-                                                }
-                                                btnObj = {
-                                                    id: child.accessory.custom_id || `v2_btn_${Date.now()}`,
-                                                    label: child.accessory.label || 'Ouvrir',
-                                                    style: child.accessory.style || 1,
-                                                    action_type: child.accessory.url ? 'link' : 'ticket',
-                                                    data: child.accessory.url || '',
-                                                    emoji: emojiString
-                                                };
-                                            }
-                                            state.items.push({ type: 9, textContent: textVal, button: btnObj });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (err) {
-                    // deferUpdate est déjà envoyé, on utilise followUp pour l'erreur
-                    return interaction.followUp({ content: '❌ Structure JSON V2 invalide ou incompatible.', ephemeral: true });
-                }
-            }
-
-            // Rafraîchissement du panneau via editReply sur l'interaction slash d'origine
-            await interaction.editReply(renderAdminPanel(state));
-        };
-
-        interaction.client.on('interactionCreate', modalListener);
-        collector.on('end', () => interaction.client.removeListener('interactionCreate', modalListener));
     }
 };
