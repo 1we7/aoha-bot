@@ -272,16 +272,39 @@ module.exports = {
 
                     if (state.rawData) {
                         if (state.rawData.content) sendPayload.content = state.rawData.content;
-                        if (state.rawData.embeds) sendPayload.embeds = state.rawData.embeds;
+                        if (state.rawData.embeds && state.rawData.embeds.length > 0) {
+                            sendPayload.embeds = state.rawData.embeds;
+                        }
                     }
 
-                    // Gestion des composants (Boutons, menus)
+                    // Gestion des composants avancés (Components V2)
                     const advancedComponents = compileComponentsV2(state, false);
+
                     if (advancedComponents.length > 0) {
+                        // Cas 1 : des composants V2 ont été parsés depuis le JSON
                         sendPayload.components = advancedComponents;
                         sendPayload.flags = [MessageFlags.IsComponentsV2];
-                    } else if (state.rawData && state.rawData.components) {
+                    } else if (state.rawData?.components && state.rawData.components.length > 0) {
+                        // Cas 2 : le JSON brut contient des composants, on les passe directement
                         sendPayload.components = state.rawData.components;
+
+                        // On ajoute le flag IsComponentsV2 si le JSON contient un container (type 17)
+                        const hasV2Container = state.rawData.components.some(c => c.type === 17);
+                        if (hasV2Container) {
+                            sendPayload.flags = [MessageFlags.IsComponentsV2];
+                        }
+                    }
+
+                    // Vérifie qu'il y a bien quelque chose à envoyer
+                    const hasContent = sendPayload.content || 
+                                       (sendPayload.embeds && sendPayload.embeds.length > 0) || 
+                                       (sendPayload.components && sendPayload.components.length > 0);
+
+                    if (!hasContent) {
+                        return interaction.followUp({ 
+                            content: '❌ Aucun contenu à envoyer. Le JSON importé ne contient ni texte, ni embed, ni composant reconnu.', 
+                            ephemeral: true 
+                        });
                     }
 
                     // Traitement de la base de données pour les boutons d'actions personnalisés
@@ -301,11 +324,18 @@ module.exports = {
                         await targetChannel.send(sendPayload);
 
                         collector.stop();
-                        return interaction.editReply({ content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
+                        return interaction.editReply({ 
+                            content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`, 
+                            embeds: [], 
+                            components: [] 
+                        });
                         
                     } catch (error) {
-                        console.error(error);
-                        return interaction.followUp({ content: `❌ Échec du transfert. Discord a refusé le format.\n**Détail :** \`${error.message}\``, ephemeral: true });
+                        console.error('[embed.js] Erreur lors de l\'envoi :', error);
+                        return interaction.followUp({ 
+                            content: `❌ Échec du transfert. Discord a refusé le format.\n**Détail :** \`${error.message}\``, 
+                            ephemeral: true 
+                        });
                     }
                 }
             }
