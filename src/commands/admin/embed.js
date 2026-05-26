@@ -73,24 +73,28 @@ function renderAdminPanel(state) {
     const embed = new EmbedBuilder()
         .setTitle('⚙️ Aoha - Émetteur de Messages')
         .setColor(state.accentColor || 9132875)
-        .setDescription('Colle directement le payload JSON généré depuis un éditeur externe pour l\'envoyer dans le salon de ton choix.');
+        .setDescription('Colle directement le payload JSON généré depuis un éditeur externe (comme discord-webhook.com) pour l\'envoyer dans le salon de ton choix.');
 
     let compositionText = '';
-    if (state.items.length === 0) {
-        compositionText = '*Aucun composant chargé. Utilise le bouton d\'importation ci-dessous.*';
+    const hasData = state.rawData || state.items.length > 0;
+
+    if (!hasData) {
+        compositionText = '*Aucun contenu chargé. Utilise le bouton d\'importation ci-dessous.*';
     } else {
-        state.items.forEach((item, index) => {
-            if (item.type === 10) compositionText += `\`[${index + 1}] Texte\`\n`;
-            else if (item.type === 14) compositionText += `\`[${index + 1}] Séparateur\`\n`;
-            else if (item.type === 12) compositionText += `\`[${index + 1}] Galerie Média\`\n`;
-            else if (item.type === 9) compositionText += `\`[${index + 1}] Section d'action\`\n`;
-        });
+        if (state.rawData) {
+            if (state.rawData.content) compositionText += `💬 **Texte :** Présent\n`;
+            if (state.rawData.embeds && state.rawData.embeds.length) {
+                compositionText += `🖼️ **Embeds :** ${state.rawData.embeds.length} chargé(s)\n`;
+            }
+        }
+        if (state.items.length > 0) {
+            compositionText += `🧩 **Composants Avancés :** ${state.items.length} chargé(s)\n`;
+        }
     }
 
     embed.addFields(
-        { name: '📋 Structure du JSON importé', value: compositionText },
-        { name: '📢 Salon cible', value: state.channelId ? `<#${state.channelId}>` : '❌ Non assigné', inline: true },
-        { name: '🎨 Couleur (Int)', value: `\`${state.accentColor}\``, inline: true }
+        { name: '📋 Données détectées', value: compositionText },
+        { name: '📢 Salon cible', value: state.channelId ? `<#${state.channelId}>` : '❌ Non assigné', inline: true }
     );
 
     const rows = [];
@@ -112,8 +116,7 @@ function renderAdminPanel(state) {
             .setStyle(ButtonStyle.Secondary)
     );
 
-    // Condition d'affichage pour le bouton d'aide / redirection ou suppression
-    if (state.items.length === 0) {
+    if (!hasData) {
         rowActions.addComponents(
             new ButtonBuilder()
                 .setLabel('🌐 Créer sur Discord-Webhook')
@@ -131,12 +134,13 @@ function renderAdminPanel(state) {
     rows.push(rowActions);
 
     // Ligne 3 : Publication
+    const isReadyToPublish = hasData && state.channelId;
     const rowPublish = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('v2_execute_publish')
             .setLabel('🚀 Publier le message')
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(state.items.length === 0 || !state.channelId)
+            .setDisabled(!isReadyToPublish)
     );
     rows.push(rowPublish);
 
@@ -150,13 +154,14 @@ function renderAdminPanel(state) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Générer et publier un message natif Discord via JSON'),
+        .setDescription('Générer et publier un message complet via JSON'),
 
     async execute(interaction) {
         const state = {
             accentColor: 9132875,
             channelId: null,
-            items: []
+            items: [],
+            rawData: null
         };
 
         const msg = await interaction.reply({ ...renderAdminPanel(state), withResponse: true });
@@ -173,6 +178,7 @@ module.exports = {
             if (i.isButton()) {
                 if (i.customId === 'v2_wipe') {
                     state.items = [];
+                    state.rawData = null;
                     return i.update(renderAdminPanel(state));
                 }
 
@@ -197,13 +203,17 @@ module.exports = {
                         const jsonRaw = mInt.fields.getTextInputValue('json_data');
                         const parsed = JSON.parse(jsonRaw);
 
+                        // Sauvegarde globale pour gérer le texte et les vrais embeds
+                        state.rawData = parsed;
+
+                        // Rétrocompatibilité si le JSON contient aussi des composants
                         let rootArray = null;
                         if (parsed.components) rootArray = parsed.components;
                         else if (Array.isArray(parsed)) rootArray = parsed;
                         else if (parsed.type === 17) rootArray = [parsed];
 
+                        state.items = [];
                         if (Array.isArray(rootArray)) {
-                            state.items = [];
                             for (const rootComp of rootArray) {
                                 if (rootComp.type === 17) {
                                     if (rootComp.accent_color) state.accentColor = rootComp.accent_color;
@@ -228,7 +238,7 @@ module.exports = {
                                                         emojiString = em.id ? `<:${em.name}:${em.id}>` : em.name;
                                                     }
                                                     btnObj = {
-                                                        id: child.accessory.custom_id || `v2_btn_${Date.now()}`,
+                                                        id: child.accessory.custom_id || `btn_${Date.now()}`,
                                                         label: child.accessory.label || 'Ouvrir',
                                                         style: child.accessory.style || 1,
                                                         action_type: child.accessory.url ? 'link' : 'ticket',
@@ -245,22 +255,36 @@ module.exports = {
                         }
                         return mInt.update(renderAdminPanel(state));
                     } catch (err) {
-                        return mInt.reply({ content: '❌ Structure JSON invalide ou corrompue.', ephemeral: true });
+                        return mInt.reply({ content: '❌ Structure JSON invalide ou mal formée.', ephemeral: true });
                     }
                 }
 
                 if (i.customId === 'v2_execute_publish') {
                     await i.deferUpdate();
 
-                    // Sécurisation : Utilisation de fetch() au lieu de cache.get()
                     const targetChannel = await interaction.guild.channels.fetch(state.channelId).catch(() => null);
-                    
                     if (!targetChannel) {
-                        return interaction.followUp({ content: '❌ Salon introuvable. Assure-toi que le bot a les permissions de le voir.', ephemeral: true });
+                        return interaction.followUp({ content: '❌ Salon introuvable. Vérifie les permissions du bot.', ephemeral: true });
                     }
 
-                    const finalComponentsPayload = compileComponentsV2(state, false);
+                    // Préparation de la charge utile d'envoi à Discord
+                    const sendPayload = {};
 
+                    if (state.rawData) {
+                        if (state.rawData.content) sendPayload.content = state.rawData.content;
+                        if (state.rawData.embeds) sendPayload.embeds = state.rawData.embeds;
+                    }
+
+                    // Gestion des composants (Boutons, menus)
+                    const advancedComponents = compileComponentsV2(state, false);
+                    if (advancedComponents.length > 0) {
+                        sendPayload.components = advancedComponents;
+                        sendPayload.flags = [MessageFlags.IsComponentsV2];
+                    } else if (state.rawData && state.rawData.components) {
+                        sendPayload.components = state.rawData.components;
+                    }
+
+                    // Traitement de la base de données pour les boutons d'actions personnalisés
                     for (const item of state.items) {
                         if (item.type === 9 && item.button && item.button.action_type !== 'link') {
                             const dbActionType = item.button.action_type === 'eph' ? 'ephemeral' : item.button.action_type;
@@ -273,19 +297,15 @@ module.exports = {
                         }
                     }
 
-                    // Ajout d'un bloc Try/Catch pour capturer les erreurs d'envoi de Discord
                     try {
-                        await targetChannel.send({
-                            flags: [MessageFlags.IsComponentsV2],
-                            components: finalComponentsPayload
-                        });
+                        await targetChannel.send(sendPayload);
 
                         collector.stop();
-                        return interaction.editReply({ content: `✅ Message propulsé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
+                        return interaction.editReply({ content: `✅ Message envoyé avec succès dans <#${state.channelId}> !`, embeds: [], components: [] });
                         
                     } catch (error) {
-                        console.error('Erreur lors de la publication :', error);
-                        return interaction.followUp({ content: `❌ Impossible d'envoyer le message. Discord a rejeté la requête.\n**Erreur technique :** \`${error.message}\``, ephemeral: true });
+                        console.error(error);
+                        return interaction.followUp({ content: `❌ Échec du transfert. Discord a refusé le format.\n**Détail :** \`${error.message}\``, ephemeral: true });
                     }
                 }
             }
