@@ -28,13 +28,17 @@ function buildNavRow(step) {
     return row;
 }
 
-function renderStep(step, state) {
+function buildPreview(state) {
     const preview = new EmbedBuilder().setColor(state.color || '#5865f2');
     if (state.title)        preview.setTitle(state.title);
-    if (state.description)  preview.setDescription(state.description);
+    // Toujours une description pour éviter l'erreur API Discord
+    preview.setDescription(state.description || '*Aucune description définie*');
     if (state.imageURL)     preview.setImage(state.imageURL);
     if (state.thumbnailURL) preview.setThumbnail(state.thumbnailURL);
+    return preview;
+}
 
+function renderStep(step, state) {
     let content = `**🛠️ Constructeur d'Embed — ${STEP_LABELS[step]}**\n${stepBar(step, TOTAL_STEPS)}\n\n`;
     const components = [];
 
@@ -92,7 +96,7 @@ function renderStep(step, state) {
         );
     }
 
-    return { content, embeds: [preview], components, ephemeral: true };
+    return { content, embeds: [buildPreview(state)], components, flags: 64 };
 }
 
 module.exports = {
@@ -108,8 +112,8 @@ module.exports = {
             buttons: [], channelId: null
         };
 
-        const msg = await interaction.reply({ ...renderStep(1, state), fetchReply: true });
-        const collector = msg.createMessageComponentCollector({ time: 900000 });
+        const msg = await interaction.reply({ ...renderStep(1, state), withResponse: true });
+        const collector = msg.resource.message.createMessageComponentCollector({ time: 900000 });
 
         collector.on('collect', async i => {
 
@@ -225,7 +229,7 @@ module.exports = {
                 const modal = new ModalBuilder().setCustomId('m_channel').setTitle('Salon de publication');
                 modal.addComponents(
                     new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId('channel_id').setLabel('ID du salon (clic droit → Copier l\'ID)').setStyle(TextInputStyle.Short).setRequired(true)
+                        new TextInputBuilder().setCustomId('channel_id').setLabel("ID du salon (clic droit → Copier l'ID)").setStyle(TextInputStyle.Short).setRequired(true)
                     )
                 );
                 await i.showModal(modal);
@@ -240,17 +244,16 @@ module.exports = {
             // Publication
             if (i.customId === 'publish') {
                 if (!state.channelId) {
-                    return i.reply({ content: '❌ Sélectionne d\'abord un salon.', ephemeral: true });
+                    return i.reply({ content: "❌ Sélectionne d'abord un salon.", flags: 64 });
                 }
-
                 const targetChannel = interaction.guild.channels.cache.get(state.channelId);
                 if (!targetChannel) {
-                    return i.reply({ content: '❌ Salon introuvable. Vérifie l\'ID.', ephemeral: true });
+                    return i.reply({ content: '❌ Salon introuvable. Vérifie l\'ID.', flags: 64 });
                 }
 
                 const finalEmbed = new EmbedBuilder().setColor(state.color);
-                if (state.title)        finalEmbed.setTitle(state.title);
-                if (state.description)  finalEmbed.setDescription(state.description);
+                if (state.title)       finalEmbed.setTitle(state.title);
+                finalEmbed.setDescription(state.description || '\u200b');
                 if (state.imageURL)     finalEmbed.setImage(state.imageURL);
                 if (state.thumbnailURL) finalEmbed.setThumbnail(state.thumbnailURL);
 
