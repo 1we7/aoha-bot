@@ -165,8 +165,9 @@ module.exports = {
         };
 
         await interaction.reply({ ...renderAdminPanel(state) });
+        const replyMessage = await interaction.fetchReply();
 
-        const collector = interaction.channel.createMessageComponentCollector({
+        const collector = replyMessage.createMessageComponentCollector({
             filter: i => i.user.id === interaction.user.id,
             time: 1800000
         });
