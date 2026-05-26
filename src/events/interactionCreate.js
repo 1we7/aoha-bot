@@ -9,7 +9,6 @@ module.exports = {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
 
-            // Isolation de la double vérification sur l'infrastructure sensible
             const sensitiveCommands = ['clear', 'kicks', 'ban', 'mute', 'embed'];
             if (sensitiveCommands.includes(interaction.commandName)) {
                 if (!isStaff(interaction.member)) {
@@ -23,7 +22,7 @@ module.exports = {
             try {
                 await command.execute(interaction);
             } catch (error) {
-                console.error(error);
+                console.error(`[ERREUR COMMANDE /${interaction.commandName}]`, error);
                 if (interaction.replied || interaction.deferred) {
                     await interaction.followUp({ content: 'Une exception interne a bloqué l\'exécution de la commande.', ephemeral: true });
                 } else {
@@ -32,7 +31,6 @@ module.exports = {
             }
         } 
         
-        // Routage et gestion dynamique des composants d'embeds personnalisés
         else if (interaction.isButton()) {
             const customBtn = db.prepare('SELECT * FROM custom_buttons WHERE custom_id = ?').get(interaction.customId);
             if (!customBtn) return;
@@ -52,15 +50,13 @@ module.exports = {
                     { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
                 ];
-                
                 for (const roleId of staffRoles) {
                     permissionOverwrites.push({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
                 }
-
                 const ticketChannel = await interaction.guild.channels.create({
                     name: `ticket-${interaction.user.username}`,
                     type: ChannelType.GuildText,
-                    permissionOverwrites: permissionOverwrites
+                    permissionOverwrites
                 });
                 await interaction.reply({ content: `Votre ticket d'assistance a été initialisé ici : ${ticketChannel}`, ephemeral: true });
             }
