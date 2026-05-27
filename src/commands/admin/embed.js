@@ -254,7 +254,8 @@ function parseJsonIntoState(parsed, state) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('embed')
-        .setDescription('Générer et publier un message complet via JSON'),
+        .setDescription('Générer et publier un message complet via JSON')
+        .setDefaultMemberPermissions(0),
 
     async execute(interaction) {
         const state = {
