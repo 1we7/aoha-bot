@@ -10,7 +10,7 @@ require('dotenv').config();
 // 1. SERVEUR EXPRESS POUR PORT RAILWAY
 // ==========================================
 const app = express();
-const PORT = process.env.PORT || 8080; // Mis sur 8080 comme dans tes logs
+const PORT = process.env.PORT || 8080;
 app.get('/', (req, res) => res.send('Aoha Bot est en ligne et opérationnel ! 🚀'));
 app.listen(PORT, () => console.log(`[Express] Serveur web actif sur le port ${PORT}`));
 
@@ -40,48 +40,48 @@ let db;
         driver: sqlite3.Database
     });
     console.log(`[SQLite] Connecté à la base de données : ${dbPath}`);
-    
-    // Création des tables de base si elles n'existent pas
     await db.exec(`CREATE TABLE IF NOT EXISTS server_config (guildId TEXT PRIMARY KEY, prefix TEXT)`);
 })();
 
 // ==========================================
-// 4. CHARGEMENT DYNAMIQUE DES COMMANDES (MODE DEBUG)
+// 4. CHARGEMENT DYNAMIQUE DES COMMANDES (AVEC SOUS-DOSSIERS)
 // ==========================================
-const commandsJSON = [];
-// On retire la sécurité qui crée un dossier vide pour forcer l'affichage de l'erreur
 const commandsPath = path.join(__dirname, 'src', 'commands');
+const commandsJSON = [];
 
-if (!fs.existsSync(commandsPath)) {
-    console.log(`[ERREUR FATALE] Le bot ne trouve pas le dossier : ${commandsPath}`);
-    console.log(`[DEBUG] Voici les dossiers qu'il voit à la racine :`, fs.readdirSync(__dirname).filter(f => !f.startsWith('.')));
-    
-    const srcPath = path.join(__dirname, 'src');
-    if (fs.existsSync(srcPath)) {
-        console.log(`[DEBUG] Et voici ce qu'il voit dans le dossier src/ :`, fs.readdirSync(srcPath));
-    }
-} else {
-    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-    console.log(`[INFO] Trouvé ${commandFiles.length} fichiers dans le dossier src/commands !`);
-    
-    for (const file of commandFiles) {
-        const filePath = path.join(commandsPath, file);
-        const command = require(filePath);
+if (fs.existsSync(commandsPath)) {
+    // On lit les sous-dossiers (admin, utils, moderation, etc.)
+    const commandFolders = fs.readdirSync(commandsPath);
+
+    for (const folder of commandFolders) {
+        const folderPath = path.join(commandsPath, folder);
         
-        if ('data' in command && 'execute' in command) {
-            client.commands.set(command.data.name, command);
-            commandsJSON.push(command.data.toJSON());
-            console.log(`[Succès] Commande chargée : /${command.data.name}`);
-        } else {
-            console.log(`[Attention] Le fichier ${file} n'a pas la bonne structure de commande.`);
+        // On vérifie que c'est bien un dossier et pas un fichier perdu
+        if (fs.lstatSync(folderPath).isDirectory()) {
+            const commandFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.js'));
+            
+            for (const file of commandFiles) {
+                const filePath = path.join(folderPath, file);
+                const command = require(filePath);
+                
+                if ('data' in command && 'execute' in command) {
+                    client.commands.set(command.data.name, command);
+                    commandsJSON.push(command.data.toJSON());
+                    console.log(`[Succès] [${folder.toUpperCase()}] /${command.data.name} chargé.`);
+                } else {
+                    console.log(`[Attention] La commande ${file} dans ${folder} n'a pas les propriétés "data" ou "execute".`);
+                }
+            }
         }
     }
+} else {
+    console.log(`[Erreur] Le dossier des commandes est introuvable à l'adresse : ${commandsPath}`);
 }
 
 // ==========================================
 // 5. ENREGISTREMENT ET CONNEXION
 // ==========================================
-client.once('clientReady', async () => { // clientReady remplace ready pour éviter le warning
+client.once('clientReady', async () => {
     console.log(`[Discord] Connecté en tant que ${client.user.tag}!`);
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -89,13 +89,12 @@ client.once('clientReady', async () => { // clientReady remplace ready pour évi
     try {
         console.log(`[Discord] Enregistrement des commandes slash en cours...`);
         
-        // Enregistrement global de toutes les commandes chargées
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: commandsJSON },
         );
         
-        console.log(`[Discord] Toutes les commandes slash ont été synchronisées !`);
+        console.log(`[Discord] Toutes les commandes slash ont été synchronisées ! Total : ${commandsJSON.length}`);
     } catch (error) {
         console.error(`[Erreur] Échec de l'enregistrement des commandes :`, error);
     }
@@ -111,7 +110,6 @@ client.on('interactionCreate', async interaction => {
     if (!command) return;
 
     try {
-        // On passe l'interaction et la base de données à la commande
         await command.execute(interaction, db);
     } catch (error) {
         console.error(error);
@@ -125,5 +123,4 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Connexion du bot avec le token de Railway
 client.login(process.env.TOKEN);
