@@ -9,11 +9,15 @@ module.exports = {
             const command = client.commands.get(interaction.commandName);
             if (!command) return;
 
-            const sensitiveCommands = ['clear', 'kicks', 'ban', 'mute', 'embed'];
+            const sensitiveCommands = [
+                'clear', 'kicks', 'ban', 'unban', 'mute', 'unmute',
+                'embed', 'role', 'warn', 'unwarn',
+                'lock', 'unlock', 'slowmode', 'nuke', 'sondage', 'timeout'
+            ];
             if (sensitiveCommands.includes(interaction.commandName)) {
                 if (!isStaff(interaction.member)) {
                     return interaction.reply({ 
-                        content: "❌ Accès refusé. Cette action nécessite le statut d'Administrateur ou un rôle répertorié comme Staff.", 
+                        content: "❌ Accès refusé. Cette action nécessite le statut d'Administrateur ou un rôle répertorié comme Staff.",
                         ephemeral: true 
                     });
                 }
