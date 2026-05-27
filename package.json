@@ -2,19 +2,15 @@
   "name": "aoha-bot",
   "version": "1.0.0",
   "description": "Bot Discord Aoha",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "deploy": "node src/deploy-commands.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.16.0",
-    "better-sqlite3": "^11.8.0",
-    "dotenv": "^16.4.5"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "author": "",
-  "license": "ISC"
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
 }
