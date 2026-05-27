@@ -10,7 +10,7 @@ require('dotenv').config();
 // 1. SERVEUR EXPRESS POUR PORT RAILWAY
 // ==========================================
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080; // Mis sur 8080 comme dans tes logs
 app.get('/', (req, res) => res.send('Aoha Bot est en ligne et opérationnel ! 🚀'));
 app.listen(PORT, () => console.log(`[Express] Serveur web actif sur le port ${PORT}`));
 
@@ -41,16 +41,19 @@ let db;
     });
     console.log(`[SQLite] Connecté à la base de données : ${dbPath}`);
     
-    // Exemple de table de configuration (ajoute les tiennes ici)
+    // Création des tables de base si elles n'existent pas
     await db.exec(`CREATE TABLE IF NOT EXISTS server_config (guildId TEXT PRIMARY KEY, prefix TEXT)`);
 })();
 
 // ==========================================
-// 4. CHARGEMENT DYNAMIQUE DES COMMANDES
+// 4. CHARGEMENT DYNAMIQUE DES COMMANDES (CORRIGÉ POUR LE DOSSIER SRC)
 // ==========================================
-const commandsPath = path.join(__dirname, 'commands');
+// Le bot va maintenant chercher tes commandes dans "src/commands"
+const commandsPath = path.join(__dirname, 'src', 'commands');
+
+// Sécurité : si le dossier n'existe pas, on le crée
 if (!fs.existsSync(commandsPath)) {
-    fs.mkdirSync(commandsPath);
+    fs.mkdirSync(commandsPath, { recursive: true });
 }
 
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -63,6 +66,7 @@ for (const file of commandFiles) {
     if ('data' in command && 'execute' in command) {
         client.commands.set(command.data.name, command);
         commandsJSON.push(command.data.toJSON());
+        console.log(`[Succès] Commande chargée : /${command.data.name}`);
     } else {
         console.log(`[Attention] La commande ${file} n'a pas les propriétés "data" ou "execute".`);
     }
@@ -71,7 +75,7 @@ for (const file of commandFiles) {
 // ==========================================
 // 5. ENREGISTREMENT ET CONNEXION
 // ==========================================
-client.once('ready', async () => {
+client.once('clientReady', async () => { // clientReady remplace ready pour éviter le warning
     console.log(`[Discord] Connecté en tant que ${client.user.tag}!`);
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -101,7 +105,7 @@ client.on('interactionCreate', async interaction => {
     if (!command) return;
 
     try {
-        // On passe l'interaction et la DB à la commande
+        // On passe l'interaction et la base de données à la commande
         await command.execute(interaction, db);
     } catch (error) {
         console.error(error);
@@ -115,4 +119,5 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+// Connexion du bot avec le token de Railway
 client.login(process.env.TOKEN);
