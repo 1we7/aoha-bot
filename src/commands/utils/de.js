@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('dé')
+        .setName('de')
         .setDescription('Lancer un ou plusieurs dés')
         .addStringOption(opt => opt.setName('format').setDescription('Ex: 1d6, 2d20, 3d8').setRequired(true)),
 

@@ -54,7 +54,7 @@ function buildPages(client) {
             .addFields(
                 { name: '`/8ball <question>`', value: 'Pose une question à la boule magique.', inline: true },
                 { name: '`/coinflip`', value: 'Lance une pièce (pile ou face).', inline: true },
-                { name: '`/dé <format>`', value: 'Lance des dés. Ex: `1d6`, `2d20`.', inline: true },
+                { name: '`/de <format>`', value: 'Lance des dés. Ex: `1d6`, `2d20`.', inline: true },
                 { name: '`/rps <choix>`', value: 'Pierre Feuille Ciseaux contre le bot.', inline: true },
                 { name: '`/choisir <options>`', value: 'Choisit aléatoirement parmi une liste (séparée par des virgules).', inline: true },
             )
