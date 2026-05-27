@@ -3,8 +3,8 @@ const { SlashCommandBuilder } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('clear')
-        .setDescription('Suppression de messages en masse (Salons textuels)
-        .setDefaultMemberPermissions(0)')
+        .setDescription('Suppression de messages en masse (Salons textuels)')
+        .setDefaultMemberPermissions(0)
         .addStringOption(opt =>
             opt.setName('nombre')
                .setDescription('Quantité de messages à supprimer (1-100), ou "all" pour tout supprimer')
