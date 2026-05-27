@@ -46,29 +46,35 @@ let db;
 })();
 
 // ==========================================
-// 4. CHARGEMENT DYNAMIQUE DES COMMANDES (CORRIGÉ POUR LE DOSSIER SRC)
+// 4. CHARGEMENT DYNAMIQUE DES COMMANDES (MODE DEBUG)
 // ==========================================
-// Le bot va maintenant chercher tes commandes dans "src/commands"
+const commandsJSON = [];
+// On retire la sécurité qui crée un dossier vide pour forcer l'affichage de l'erreur
 const commandsPath = path.join(__dirname, 'src', 'commands');
 
-// Sécurité : si le dossier n'existe pas, on le crée
 if (!fs.existsSync(commandsPath)) {
-    fs.mkdirSync(commandsPath, { recursive: true });
-}
-
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-const commandsJSON = [];
-
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
+    console.log(`[ERREUR FATALE] Le bot ne trouve pas le dossier : ${commandsPath}`);
+    console.log(`[DEBUG] Voici les dossiers qu'il voit à la racine :`, fs.readdirSync(__dirname).filter(f => !f.startsWith('.')));
     
-    if ('data' in command && 'execute' in command) {
-        client.commands.set(command.data.name, command);
-        commandsJSON.push(command.data.toJSON());
-        console.log(`[Succès] Commande chargée : /${command.data.name}`);
-    } else {
-        console.log(`[Attention] La commande ${file} n'a pas les propriétés "data" ou "execute".`);
+    const srcPath = path.join(__dirname, 'src');
+    if (fs.existsSync(srcPath)) {
+        console.log(`[DEBUG] Et voici ce qu'il voit dans le dossier src/ :`, fs.readdirSync(srcPath));
+    }
+} else {
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    console.log(`[INFO] Trouvé ${commandFiles.length} fichiers dans le dossier src/commands !`);
+    
+    for (const file of commandFiles) {
+        const filePath = path.join(commandsPath, file);
+        const command = require(filePath);
+        
+        if ('data' in command && 'execute' in command) {
+            client.commands.set(command.data.name, command);
+            commandsJSON.push(command.data.toJSON());
+            console.log(`[Succès] Commande chargée : /${command.data.name}`);
+        } else {
+            console.log(`[Attention] Le fichier ${file} n'a pas la bonne structure de commande.`);
+        }
     }
 }
 
