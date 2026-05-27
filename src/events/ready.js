@@ -12,12 +12,6 @@ module.exports = {
             const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
             console.log(`Déploiement de ${client.commandsData.length} commandes...`);
 
-            // On vide d'abord les commandes globales (résidu éventuel)
-            await rest.put(
-                Routes.applicationCommands(process.env.CLIENT_ID),
-                { body: [] }
-            );
-
             // On déploie toutes les commandes sur le serveur
             await rest.put(
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
@@ -26,7 +20,8 @@ module.exports = {
 
             console.log(`✅ ${client.commandsData.length} commandes déployées avec succès.`);
         } catch (error) {
-            console.error('Erreur lors du déploiement des commandes :', error);
+            console.error('❌ Erreur deploy commandes :', error?.message ?? error);
+            if (error?.rawError) console.error('Discord API error:', JSON.stringify(error.rawError));
         }
 
         // ── Cache des invitations ──────────────────────────────────────────
