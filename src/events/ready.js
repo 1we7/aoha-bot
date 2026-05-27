@@ -1,4 +1,4 @@
-const { Events, REST, Routes } = require('discord.js');
+const { Events } = require('discord.js');
 const db = require('../database');
 
 module.exports = {
@@ -6,23 +6,6 @@ module.exports = {
     once: true,
     async execute(client) {
         console.log(`Statut opérationnel : Connecté sur le compte ${client.user.tag}`);
-
-        // ── Deploy des slash commands ──────────────────────────────────────
-        try {
-            const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-            console.log(`Déploiement de ${client.commandsData.length} commandes...`);
-
-            // On déploie toutes les commandes sur le serveur
-            await rest.put(
-                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-                { body: client.commandsData }
-            );
-
-            console.log(`✅ ${client.commandsData.length} commandes déployées avec succès.`);
-        } catch (error) {
-            console.error('❌ Erreur deploy commandes :', error?.message ?? error);
-            if (error?.rawError) console.error('Discord API error:', JSON.stringify(error.rawError));
-        }
 
         // ── Cache des invitations ──────────────────────────────────────────
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
